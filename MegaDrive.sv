@@ -168,6 +168,8 @@ module emu
 	// 1 - D-/TX
 	// 2..6 - USR2..USR6
 	// Set USER_OUT to 1 to read from USER_IN.
+	output	USER_OSD,
+	output  [1:0] USER_MODE,
 	input   [7:0] USER_IN,
 	output  [7:0] USER_OUT,
 
@@ -175,6 +177,16 @@ module emu
 );
 
 assign ADC_BUS  = 'Z;
+
+wire         CLK_JOY = CLK_50M;         //Assign clock between 40-50Mhz
+wire   [2:0] JOY_FLAG  = {status[62],status[63],status[56]};
+wire         JOY_CLK, JOY_LOAD, JOY_SPLIT, JOY_MDSEL;
+wire   [5:0] JOY_MDIN  = JOY_FLAG[2] ? {USER_IN[6],USER_IN[3],USER_IN[5],USER_IN[7],USER_IN[1],USER_IN[2]} : '1;
+wire         JOY_DATA  = JOY_FLAG[1] ? USER_IN[5] : '1;
+assign       USER_OUT  = JOY_FLAG[2] ? {3'b111,JOY_SPLIT,3'b111,JOY_MDSEL} : JOY_FLAG[1] ? {6'b111111,JOY_CLK,JOY_LOAD} : '1;
+assign       USER_MODE = JOY_FLAG[2:1] ;
+assign       USER_OSD  = joydb_1[10] & joydb_1[6];
+
 assign {UART_RTS, UART_TXD, UART_DTR} = 0;
 assign BUTTONS   = osd_btn;
 assign {SD_SCK, SD_MOSI, SD_CS} = 'Z;
@@ -254,6 +266,9 @@ localparam CONF_STR = {
 
 	"P2,Input;",
 	"P2-;",
+	"P2oUV,UserIO Joystick,Off,DB9MD,DB15 ;",
+	"P2oO,UserIO Players, 1 Player,2 Players;",
+	"P2-;",
 	"P2O[4],Swap Joysticks,No,Yes;",
 	"P2O[5],6 Buttons Mode,No,Yes;",
 	"P2O[39:37],Multitap,Disabled,4-Way,TeamPlayer: Port1,TeamPlayer: Port2,J-Cart;",
@@ -264,8 +279,6 @@ localparam CONF_STR = {
 	"P2O[41:40],Gun Control,Disabled,Joy1,Joy2,Mouse;",
 	"D4P2O[42],Gun Fire,Joy,Mouse;",
 	"D4P2O[44:43],Cross,Small,Medium,Big,None;",
-	"P2-;",
-	"P2O[63:62],SNAC,Off,Port 1,Port 2,Port 3;",
 
 	"-;",
 	"O[61],Pause When OSD is Open,No,Yes;",
@@ -357,7 +370,7 @@ assign CLK_VIDEO = clk_107m;
 
 wire[127:0] status;
 wire  [1:0] buttons;
-wire [11:0] joystick_0,joystick_1,joystick_2,joystick_3,joystick_4;
+wire [11:0] joystick_0_USB,joystick_1_USB,joystick_2_USB,joystick_3_USB,joystick_4_USB;
 wire  [7:0] joy0_x,joy0_y,joy1_x,joy1_y;
 wire        ioctl_download;
 wire        ioctl_wr;
@@ -385,16 +398,55 @@ wire [24:0] ps2_mouse;
 wire [21:0] gamma_bus;
 wire [15:0] sdram_sz;
 
+// ZY XMS CBA UDLR
+wire [31:0] joystick_0 = joydb_1ena ? (OSD_STATUS? 32'b000000 : {joydb_1[9],joydb_1[8],joydb_1[7],joydb_1[11],joydb_1[10],joydb_1[6:0]}) : joystick_0_USB;
+wire [31:0] joystick_1 = joydb_2ena ? (OSD_STATUS? 32'b000000 : {joydb_2[9],joydb_2[8],joydb_2[7],joydb_2[11],joydb_2[10],joydb_2[6:0]}) : joydb_1ena ? joystick_0_USB : joystick_1_USB;
+wire [31:0] joystick_2 = joydb_2ena ? joystick_0_USB : joydb_1ena ? joystick_1_USB : joystick_2_USB;
+wire [31:0] joystick_3 = joydb_2ena ? joystick_1_USB : joydb_1ena ? joystick_2_USB : joystick_3_USB;
+wire [31:0] joystick_4 = joydb_2ena ? joystick_2_USB : joydb_1ena ? joystick_3_USB : joystick_4_USB;
+
+wire [15:0] joydb_1 = JOY_FLAG[2] ? JOYDB9MD_1 : JOY_FLAG[1] ? JOYDB15_1 : '0;
+wire [15:0] joydb_2 = JOY_FLAG[2] ? JOYDB9MD_2 : JOY_FLAG[1] ? JOYDB15_2 : '0;
+wire        joydb_1ena = |JOY_FLAG[2:1]              ;
+wire        joydb_2ena = |JOY_FLAG[2:1] & JOY_FLAG[0];
+
+//----BA 9876543210
+//----MS ZYXCBAUDLR
+reg [15:0] JOYDB9MD_1,JOYDB9MD_2;
+joy_db9md joy_db9md
+(
+  .clk       ( CLK_JOY    ), //40-50MHz
+  .joy_split ( JOY_SPLIT  ),
+  .joy_mdsel ( JOY_MDSEL  ),
+  .joy_in    ( JOY_MDIN   ),
+  .joystick1 ( JOYDB9MD_1 ),
+  .joystick2 ( JOYDB9MD_2 )
+);
+
+//----BA 9876543210
+//----LS FEDCBAUDLR
+reg [15:0] JOYDB15_1,JOYDB15_2;
+joy_db15 joy_db15
+(
+  .clk       ( CLK_JOY   ), //48MHz
+  .JOY_CLK   ( JOY_CLK   ),
+  .JOY_DATA  ( JOY_DATA  ),
+  .JOY_LOAD  ( JOY_LOAD  ),
+  .joystick1 ( JOYDB15_1 ),
+  .joystick2 ( JOYDB15_2 )
+);
+
 hps_io #(.CONF_STR(CONF_STR), .WIDE(1)) hps_io
 (
 	.clk_sys(clk_sys),
 	.HPS_BUS(HPS_BUS),
 
-	.joystick_0(joystick_0),
-	.joystick_1(joystick_1),
-	.joystick_2(joystick_2),
-	.joystick_3(joystick_3),
-	.joystick_4(joystick_4),
+	.joystick_0(joystick_0_USB),
+	.joystick_1(joystick_1_USB),
+	.joystick_2(joystick_2_USB),
+	.joystick_3(joystick_3_USB),
+	.joystick_4(joystick_4_USB),
+	.joy_raw(OSD_STATUS? (joydb_1[5:0]|joydb_2[5:0]) : 6'b000000 ),
 	.joystick_l_analog_0({joy0_y, joy0_x}),
 	.joystick_l_analog_1({joy1_y, joy1_x}),
 
@@ -1101,12 +1153,12 @@ md_io md_io
 	.jcart_th(jcart_th),
 
 	.port1_out(md_io_port1),
-	.port1_in(PA_o  | {7{snac_port1}}),
-	.port1_dir(PA_d | {7{snac_port1}}),
+	.port1_in(PA_o),
+	.port1_dir(PA_d),
 
 	.port2_out(md_io_port2),
-	.port2_in(PB_o  | {7{snac_port2}}),
-	.port2_dir(PB_d | {7{snac_port2}})
+	.port2_in(PB_o),
+	.port2_dir(PB_d)
 );
 
 wire [2:0] lg_target;
@@ -1147,35 +1199,9 @@ lightgun lightgun
 	.BTN_START(lg_start)
 );
 
-wire [6:0] SNAC_IN;
-wire [6:0] SNAC_OUT;
-always_comb begin
-	SNAC_IN[0]  = USER_IN[5]; //up
-	SNAC_IN[1]  = USER_IN[7]; //down
-	SNAC_IN[2]  = USER_IN[1]; //left
-	SNAC_IN[3]  = USER_IN[2]; //right
-	SNAC_IN[4]  = USER_IN[3]; //b TL
-	SNAC_IN[5]  = USER_IN[6]; //c TR GPIO7
-	SNAC_IN[6]  = USER_IN[0]; //  TH
-	USER_OUT[5] = SNAC_OUT[0];
-	USER_OUT[7] = SNAC_OUT[1];
-	USER_OUT[1] = SNAC_OUT[2];
-	USER_OUT[2] = SNAC_OUT[3];
-	USER_OUT[3] = SNAC_OUT[4];
-	USER_OUT[6] = SNAC_OUT[5];
-	USER_OUT[0] = SNAC_OUT[6];
-end
-
-wire snac_port1 = (status[63:62] == 1);
-assign PA_i = snac_port1 ? SNAC_IN : md_io_port1;
-
-wire snac_port2 = (status[63:62] == 2);
-assign PB_i = snac_port2 ? SNAC_IN : md_io_port2;
-
-wire snac_port3 = (status[63:62] == 3);
-assign PC_i = snac_port3 ? SNAC_IN : (PC_d | PC_o);
-
-assign SNAC_OUT = snac_port1 ? (PA_d | PA_o) : snac_port2 ? (PB_d | PB_o) : snac_port3 ? (PC_d | PC_o) : 7'h7F;
+assign PA_i = md_io_port1;
+assign PB_i = md_io_port2;
+assign PC_i = (PC_d | PC_o);
 
 /////////////////////////  BRAM SAVE/LOAD  /////////////////////////////
 

@@ -1,5 +1,7 @@
 set_global_assignment -name QIP_FILE rtl/VM2413/opll.qip
 set_global_assignment -name QIP_FILE rtl/SVP/SVP.qip
+set_global_assignment -name VERILOG_FILE joydb9md.v
+set_global_assignment -name VERILOG_FILE joydb15.v
 set_global_assignment -name QIP_FILE rtl/nuked-md.qip
 set_global_assignment -name VHDL_FILE rtl/bram.vhd
 set_global_assignment -name VERILOG_FILE rtl/ram_md.v
